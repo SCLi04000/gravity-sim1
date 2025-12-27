@@ -1,27 +1,34 @@
-<!doctype html>
-<html lang="zh-Hant">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Gravity Simulation 3D</title>
-  <link rel="stylesheet" href="./style.css" />
-</head>
-<body>
-  <div id="hud">
-    <div><b>Gravity Simulation 3D</b></div>
-    <div>Drag: rotate • Wheel: zoom • Right drag: pan</div>
-    <div>Press Space to pause/resume, R to reset, V to toggle velocity arrows</div>
-    <div id="energy"></div>
-  </div>
-  <!-- Load three.js and OrbitControls from CDN via importmap -->
-  <script type="importmap">
-    {
-      "imports": {
-        "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
-        "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
-      }
-    }
-  </script>
-  <script type="module" src="./main.js"></script>
-</body>
-</html>
+diff --git a/index.html b/index.html
+index 2446bf3ba032db4bda9764602ae263f249405bd2..7fdec92c16404ffdb07e1975fcfbbe8187d15959 100644
+--- a/index.html
++++ b/index.html
+@@ -1,27 +1,26 @@
+ <!doctype html>
+ <html lang="zh-Hant">
+ <head>
+   <meta charset="utf-8" />
+   <meta name="viewport" content="width=device-width,initial-scale=1" />
+   <title>Gravity Simulation 3D</title>
+   <link rel="stylesheet" href="./style.css" />
+ </head>
+ <body>
+   <div id="hud">
+     <div><b>Gravity Simulation 3D</b></div>
+     <div>Drag: rotate • Wheel: zoom • Right drag: pan</div>
+     <div>Press Space to pause/resume, R to reset, V to toggle velocity arrows</div>
+     <div id="energy"></div>
+   </div>
+-  <!-- Load three.js and OrbitControls from CDN via importmap -->
+   <script type="importmap">
+     {
+       "imports": {
+         "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+         "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+       }
+     }
+   </script>
+   <script type="module" src="./main.js"></script>
+ </body>
+-</html>
+\ No newline at end of file
++</html>
