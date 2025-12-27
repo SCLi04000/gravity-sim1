@@ -345,11 +345,7 @@ function strainSummary() {
   return { average: total / bonds.length, max };
 }
 
-function recordAnalysisFrame(frame) {
-  if (!analysisCapture.enabled) return;
-  const visibleNodes = nodes.filter((node) => node.showVisual);
-  const snapshot = {
-    frame,
+
 function recordAnalysisFrame(frame) {
   if (!analysisCapture.enabled) return;
   const visibleNodes = nodes.filter((node) => node.showVisual);
@@ -372,7 +368,7 @@ function recordAnalysisFrame(frame) {
     })
   };
 
-    analysisCapture.data.push(snapshot);
+  analysisCapture.data.push(snapshot);
   if (analysisCapture.data.length >= analysisCapture.maxFrames) {
     stopAndExportAnalysis();
   }
