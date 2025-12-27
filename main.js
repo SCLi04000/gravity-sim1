@@ -1,4 +1,9 @@
-const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 2000);
+
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+const scene = new THREE.Scene();
+scene.fog = new THREE.Fog(0x0b0f1a, 50, 500);const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 2000);
 camera.position.set(100, 80, 150);
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
