@@ -39,7 +39,7 @@ const simParams = {
   nodeMass: 12
 };
 class Node {
-  constructor(index, { pos, color }) {
+  constructor(index, { pos, color, fixed = false, showVisual = true }) {
     this.index = index;
     this.pos = pos.clone();
     this.vel = new THREE.Vector3();
@@ -47,23 +47,28 @@ class Node {
     this.mass = simParams.nodeMass;
     this.radius = radius;
     this.baseColor = new THREE.Color(color);
-    this.adjacency = [];
+    this.adjacency = [];\
+    this.fixed = fixed;
+    this.showVisual = showVisual;
     const geometry = new THREE.SphereGeometry(1, 32, 32);
     const material = new THREE.MeshStandardMaterial({ color: this.baseColor, metalness: 0.1, roughness: 0.4 });
     this.mesh = new THREE.Mesh(geometry, material);
     this.mesh.scale.setScalar(this.radius);
+    his.mesh.visible = this.showVisual;
     this.mesh.position.copy(this.pos);
     scene.add(this.mesh);
     const dirVec = this.vel.clone().normalize();
     const length = Math.max(this.vel.length() * 0.5, 0.1);
     this.arrow = new THREE.ArrowHelper(dirVec, this.pos.clone(), length, 0xffff00);
     this.arrow.visible = false;
+     this.arrow.visible = this.showVisual && this.arrow.visible;
     scene.add(this.arrow);
     this.trailPoints = [];
     this.trailLine = new THREE.Line(
       new THREE.BufferGeometry(),
       new THREE.LineBasicMaterial({ color: 0x9aa4c2, transparent: true, opacity: 0.6 })
     );
+    this.trailLine.visible = this.showVisual;
     scene.add(this.trailLine);
   }
   resetForces() {
@@ -74,15 +79,18 @@ class Node {
     this.adjacency.push({ targetIndex, restLength, stiffness });
   }
   applyForce(force) {
+     if (this.fixed) return;
     this.acc.addScaledVector(force, 1 / this.mass);
   }
   integrate(dt) {
+    if (this.fixed) return;
     this.vel.addScaledVector(this.acc, dt);
     this.vel.multiplyScalar(1 - simParams.damping * dt);
     this.pos.addScaledVector(this.vel, dt);
     this.mesh.position.copy(this.pos);
   }
   updateVisuals(showVel, showStress) {
+    if (!this.showVisual) return;
     const stressColor = lineMaxColor;
     const factor = showStress ? THREE.MathUtils.clamp(this.currentStrain * 3, 0, 1) : 0;
     const blended = this.baseColor.clone().lerp(stressColor, factor);
@@ -120,6 +128,8 @@ let showVel = false;
 let showStress = true;
 let bondedPairs = new Set();
 function clearScene() {
+  const boundaryRadius = baseDistance * 3;
+const minRepulsionDistance = radius * 1.5;
   nodes.forEach((node) => {
     scene.remove(node.mesh, node.arrow, node.trailLine);
   });
@@ -183,6 +193,25 @@ function reset() {
   addBond(0, 5, kZPlus, 'z+');
   addBond(0, 6, kZMinus, 'z-');
   buildBondLines();
+  const boundaryPositions = [];
+  [-boundaryRadius, 0, boundaryRadius].forEach((x) => {
+    [-boundaryRadius, 0, boundaryRadius].forEach((y) => {
+      [-boundaryRadius, 0, boundaryRadius].forEach((z) => {
+        if (x === 0 && y === 0 && z === 0) return;
+        boundaryPositions.push(new THREE.Vector3(x, y, z));
+      });
+    });
+  });
+  boundaryPositions.forEach((pos) => {
+    const index = nodes.length;
+    const boundaryNode = new Node(index, {
+      pos,
+      color: 0x1f2433,
+      fixed: true,
+      showVisual: false
+    });
+    nodes.push(boundaryNode);
+  });
   paused = false;
 }
 function applyBondForces() {
@@ -211,6 +240,24 @@ function applyRepulsion() {
       const b = nodes[j];
       const delta = b.pos.clone().sub(a.pos);
       const dist = Math.max(delta.length(), 1e-5);
+      if (dist >= repulsionLength) continue;
+       if (dist < minRepulsionDistance) {
+        const penetration = minRepulsionDistance - dist;
+        const forceMag = repulsionStrength * (penetration / minRepulsionDistance);
+        const force = dir.clone().multiplyScalar(forceMag);
+        a.applyForce(force.clone().multiplyScalar(-1));
+        b.applyForce(force);
+        const relativeVel = b.vel.clone().sub(a.vel);
+        const closingSpeed = relativeVel.dot(dir);
+        if (closingSpeed < 0) {
+          const impulse = dir.clone().multiplyScalar(closingSpeed * 0.6);
+          if (!a.fixed) a.vel.add(impulse);
+          if (!b.fixed) b.vel.add(impulse.clone().multiplyScalar(-1));
+          if (!a.fixed) a.vel.multiplyScalar(0.85);
+          if (!b.fixed) b.vel.multiplyScalar(0.85);
+        }
+        continue;
+      }
       if (dist >= repulsionLength) continue;
       const dir = delta.multiplyScalar(1 / dist);
       const strength = repulsionStrength * (1 - dist / repulsionLength);
