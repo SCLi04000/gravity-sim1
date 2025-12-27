@@ -32,6 +32,7 @@ const radius = 3.5;
 const repulsionStrength = 80;
 const repulsionLength = radius * 4;
 const minRepulsionDistance = radius * 1.5;
+const maxVelocity = 120;
 const lineBaseColor = new THREE.Color(0x4aa3ff);
 const lineMaxColor = new THREE.Color(0xff5555);
 
@@ -101,6 +102,9 @@ class Node {
     if (this.fixed) return;
     this.vel.addScaledVector(this.acc, dt);
     this.vel.multiplyScalar(1 - simParams.damping * dt);
+    if (this.vel.lengthSq() > maxVelocity * maxVelocity) {
+      this.vel.setLength(maxVelocity);
+    }
     this.pos.addScaledVector(this.vel, dt);
     this.mesh.position.copy(this.pos);
   }
@@ -342,6 +346,16 @@ function integrate(dt) {
   updateBondLines();
 }
 
+function stableSubsteps(dt) {
+  if (bonds.length === 0 || nodes.length === 0) return 1;
+  const maxK = bonds.reduce((max, b) => Math.max(max, b.stiffness), 0.001);
+  const minMass = nodes.filter((n) => !n.fixed).reduce((min, n) => Math.min(min, n.mass), simParams.nodeMass);
+  const criticalDt = Math.sqrt(minMass / maxK);
+  const maxStep = 0.35 * criticalDt;
+  const steps = Math.max(1, Math.ceil(dt / Math.max(maxStep, 1e-5)));
+  return Math.min(steps, 40);
+}
+
 function updateBondRestLengths() {
   bonds.forEach((bond) => {
     const newRest = getRestLengthForRole(bond.role);
@@ -467,7 +481,7 @@ function animate() {
   requestAnimationFrame(animate);
   const dt = Math.min(clock.getDelta(), 0.03);
   if (!paused) {
-    const steps = 4;
+    const steps = stableSubsteps(dt);
     for (let i = 0; i < steps; i++) {
       integrate(dt / steps);
     }
