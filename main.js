@@ -243,9 +243,30 @@ function reset() {
   addBond(0, 6, kZMinus, 'z-');
 
   buildBondLines();
+  injectThermalKick();
   applyParameterChanges();
   nodes.forEach((node) => node.updateVisuals(showVel, showStress));
   updateBondLines();
+}
+
+function injectThermalKick() {
+  const displacementMag = 0.6;
+  const velocityMag = 1.2;
+  nodes.forEach((node) => {
+    if (node.index === 0) return;
+    node.pos.add(new THREE.Vector3(
+      (Math.random() - 0.5) * displacementMag,
+      (Math.random() - 0.5) * displacementMag,
+      (Math.random() - 0.5) * displacementMag
+    ));
+    node.mesh.position.copy(node.pos);
+
+    node.vel.add(new THREE.Vector3(
+      (Math.random() - 0.5) * velocityMag,
+      (Math.random() - 0.5) * velocityMag,
+      (Math.random() - 0.5) * velocityMag
+    ));
+  });
 }
 
 function applyBondForces() {
@@ -320,6 +341,7 @@ function integrate(dt) {
   nodes.forEach((node) => node.integrate(dt));
   updateBondLines();
 }
+
 function updateBondRestLengths() {
   bonds.forEach((bond) => {
     const newRest = getRestLengthForRole(bond.role);
@@ -332,12 +354,12 @@ function updateBondRestLengths() {
   });
 }
 
-
 function applyParameterChanges() {
   nodes.forEach((node) => {
     node.mass = simParams.nodeMass;
   });
- updateBondRestLengths();
+
+  updateBondRestLengths();
   bonds.forEach((bond) => {
     switch (bond.role) {
       case 'z+':
@@ -360,7 +382,6 @@ function energySummary() {
   }, 0);
   const { jahnTeller } = jahnTellerSummary();
   return { kinetic, elastic, jahnTeller, total: kinetic + elastic + jahnTeller };
-  return { kinetic, elastic, total: kinetic + elastic };
 }
 
 function strainSummary() {
@@ -374,6 +395,7 @@ function strainSummary() {
   });
   return { average: total / bonds.length, max };
 }
+
 function jahnTellerSummary() {
   const { q2, q3 } = distortionMetrics();
   const jahnTeller = 0.5 * simParams.jahnTellerCoupling * (q2 * q2 + q3 * q3);
@@ -389,7 +411,6 @@ function distortionMetrics() {
   const q2 = (rX - rY) / Math.sqrt(2);
   return { q2, q3, rX, rY, rZ };
 }
-
 
 function recordAnalysisFrame(frame) {
   if (!analysisCapture.enabled) return;
@@ -458,8 +479,7 @@ function animate() {
     const jahn = jahnTellerSummary();
     const energyDiv = document.getElementById('energy');
     const strainDiv = document.getElementById('strain');
-    const distortion = distortionMetrics();
-    const jahn = jahnTellerSummary();
+    const distortionDiv = document.getElementById('distortion');
     if (energyDiv) {
       energyDiv.innerText = `Kinetic: ${energy.kinetic.toFixed(2)} | Spring: ${energy.elastic.toFixed(2)} | JT: ${energy.jahnTeller.toFixed(2)} | Total: ${energy.total.toFixed(2)}`;
     }
