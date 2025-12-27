@@ -23,6 +23,51 @@ body {
   z-index: 10;
   pointer-events: none;
 }
+#controls {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  pointer-events: auto;
+}
+
+.control-row {
+  display: grid;
+  grid-template-columns: 100px 1fr 82px 60px;
+  align-items: center;
+  gap: 6px;
+}
+
+.control-row label {
+  color: #cdd4e4;
+}
+
+.control-row input[type='number'] {
+  width: 80px;
+}
+
+.control-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 4px;
+  pointer-events: auto;
+}
+
+.control-actions button {
+  background: #1c2538;
+  color: #e7eaf3;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 6px;
+  padding: 6px 10px;
+  cursor: pointer;
+}
+
+.control-actions button:hover {
+  background: #24304a;
+}
 
 canvas {
   display: block;
