@@ -1,34 +1,58 @@
-diff --git a/index.html b/index.html
-index 2446bf3ba032db4bda9764602ae263f249405bd2..7fdec92c16404ffdb07e1975fcfbbe8187d15959 100644
---- a/index.html
-+++ b/index.html
-@@ -1,27 +1,26 @@
- <!doctype html>
- <html lang="zh-Hant">
- <head>
-   <meta charset="utf-8" />
-   <meta name="viewport" content="width=device-width,initial-scale=1" />
-   <title>Gravity Simulation 3D</title>
-   <link rel="stylesheet" href="./style.css" />
- </head>
- <body>
-   <div id="hud">
-     <div><b>Gravity Simulation 3D</b></div>
-     <div>Drag: rotate • Wheel: zoom • Right drag: pan</div>
-     <div>Press Space to pause/resume, R to reset, V to toggle velocity arrows</div>
-     <div id="energy"></div>
-   </div>
--  <!-- Load three.js and OrbitControls from CDN via importmap -->
-   <script type="importmap">
-     {
-       "imports": {
-         "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
-         "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
-       }
-     }
-   </script>
-   <script type="module" src="./main.js"></script>
- </body>
--</html>
-\ No newline at end of file
-+</html>
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Gravity Simulation 3D</title>
+  <link rel="stylesheet" href="./style.css" />
+</head>
+  <body>
+    <div id="hud">
+      <div><b>Gravity Simulation 3D</b></div>
+      <div>Drag: rotate • Wheel: zoom • Right drag: pan</div>
+      <div>Press Space to pause/resume, R to reset, V to toggle velocity arrows, C to toggle stress colors</div>
+      <div id="energy"></div>
+      <div id="controls">
+        <div class="control-row">
+          <label for="delta">Jahn-Teller δ</label>
+          <input id="delta" type="range" min="0" max="1" step="0.01" value="0.25" />
+          <input id="deltaInput" type="number" min="0" max="1" step="0.01" value="0.25" />
+          <span class="value">0.25</span>
+        </div>
+        <div class="control-row">
+          <label for="kxy">k_xy</label>
+          <input id="kxy" type="range" min="1" max="30" step="0.1" value="10" />
+          <input id="kxyInput" type="number" min="1" max="30" step="0.1" value="10" />
+          <span class="value">10.0</span>
+        </div>
+        <div class="control-row">
+          <label for="mass">質量</label>
+          <input id="mass" type="range" min="1" max="30" step="0.5" value="12" />
+          <input id="massInput" type="number" min="1" max="30" step="0.5" value="12" />
+          <span class="value">12.0</span>
+        </div>
+        <div class="control-row">
+          <label for="damping">阻尼</label>
+          <input id="damping" type="range" min="0" max="0.2" step="0.001" value="0.04" />
+          <input id="dampingInput" type="number" min="0" max="0.2" step="0.001" value="0.04" />
+          <span class="value">0.040</span>
+        </div>
+        <div class="control-actions">
+          <button id="reset-btn" type="button">Reset 結構</button>
+          <button id="toggle-stress" type="button">隱藏鍵色應力圖</button>
+          <button id="toggle-vel" type="button">顯示節點速度箭頭</button>
+        </div>
+      </div>
+    </div>
+    <!-- Load three.js and OrbitControls from CDN via importmap -->
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+        "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+      }
+    }
+  </script>
+  <script type="module" src="./main.js"></script>
+</body>
+</html>
