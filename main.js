@@ -27,10 +27,12 @@ scene.add(grid);
 
 // Parameters
 const baseDistance = 35;
+const baseRestLength = baseDistance;
 const radius = 3.5;
 const repulsionStrength = 80;
 const repulsionLength = radius * 4;
 const minRepulsionDistance = radius * 1.5;
+const maxVelocity = 120;
 const lineBaseColor = new THREE.Color(0x4aa3ff);
 const lineMaxColor = new THREE.Color(0xff5555);
 
@@ -38,7 +40,8 @@ const simParams = {
   bondKXY: 10,
   jahnTellerDelta: 0.25,
   damping: 0.04,
-  nodeMass: 12
+  nodeMass: 12,
+  jahnTellerCoupling: 2.2
 };
 
 class Node {
@@ -86,8 +89,8 @@ class Node {
     this.currentStrain = 0;
   }
 
-  addBond(targetIndex, restLength, stiffness) {
-    this.adjacency.push({ targetIndex, restLength, stiffness });
+  addBond(targetIndex, restLength, stiffness, role = 'xy') {
+    this.adjacency.push({ targetIndex, restLength, stiffness, role });
   }
 
   applyForce(force) {
@@ -99,6 +102,9 @@ class Node {
     if (this.fixed) return;
     this.vel.addScaledVector(this.acc, dt);
     this.vel.multiplyScalar(1 - simParams.damping * dt);
+    if (this.vel.lengthSq() > maxVelocity * maxVelocity) {
+      this.vel.setLength(maxVelocity);
+    }
     this.pos.addScaledVector(this.vel, dt);
     this.mesh.position.copy(this.pos);
   }
@@ -167,12 +173,26 @@ function clearScene() {
 function addBond(aIndex, bIndex, stiffness, role = 'xy') {
   const a = nodes[aIndex];
   const b = nodes[bIndex];
-  const restLength = a.pos.distanceTo(b.pos);
+  const restLength = getRestLengthForRole(role);
   bonds.push({ aIndex, bIndex, restLength, stiffness, strain: 0, role });
-  a.addBond(bIndex, restLength, stiffness);
-  b.addBond(aIndex, restLength, stiffness);
+  a.addBond(bIndex, restLength, stiffness, role);
+  b.addBond(aIndex, restLength, stiffness, role);
   const key = `${Math.min(aIndex, bIndex)}-${Math.max(aIndex, bIndex)}`;
   bondedPairs.add(key);
+}
+
+function getRestLengthForRole(role) {
+  const delta = simParams.jahnTellerDelta;
+  const axialScale = 1 + delta * 0.35;
+  const compressiveScale = 1 - delta * 0.35;
+  switch (role) {
+    case 'z+':
+      return baseRestLength * axialScale;
+    case 'z-':
+      return baseRestLength * compressiveScale;
+    default:
+      return baseRestLength;
+  }
 }
 
 function buildBondLines() {
@@ -227,9 +247,30 @@ function reset() {
   addBond(0, 6, kZMinus, 'z-');
 
   buildBondLines();
+  injectThermalKick();
   applyParameterChanges();
   nodes.forEach((node) => node.updateVisuals(showVel, showStress));
   updateBondLines();
+}
+
+function injectThermalKick() {
+  const displacementMag = 0.6;
+  const velocityMag = 1.2;
+  nodes.forEach((node) => {
+    if (node.index === 0) return;
+    node.pos.add(new THREE.Vector3(
+      (Math.random() - 0.5) * displacementMag,
+      (Math.random() - 0.5) * displacementMag,
+      (Math.random() - 0.5) * displacementMag
+    ));
+    node.mesh.position.copy(node.pos);
+
+    node.vel.add(new THREE.Vector3(
+      (Math.random() - 0.5) * velocityMag,
+      (Math.random() - 0.5) * velocityMag,
+      (Math.random() - 0.5) * velocityMag
+    ));
+  });
 }
 
 function applyBondForces() {
@@ -305,11 +346,34 @@ function integrate(dt) {
   updateBondLines();
 }
 
+function stableSubsteps(dt) {
+  if (bonds.length === 0 || nodes.length === 0) return 1;
+  const maxK = bonds.reduce((max, b) => Math.max(max, b.stiffness), 0.001);
+  const minMass = nodes.filter((n) => !n.fixed).reduce((min, n) => Math.min(min, n.mass), simParams.nodeMass);
+  const criticalDt = Math.sqrt(minMass / maxK);
+  const maxStep = 0.35 * criticalDt;
+  const steps = Math.max(1, Math.ceil(dt / Math.max(maxStep, 1e-5)));
+  return Math.min(steps, 40);
+}
+
+function updateBondRestLengths() {
+  bonds.forEach((bond) => {
+    const newRest = getRestLengthForRole(bond.role);
+    bond.restLength = newRest;
+  });
+  nodes.forEach((node) => {
+    node.adjacency.forEach((edge) => {
+      edge.restLength = getRestLengthForRole(edge.role);
+    });
+  });
+}
+
 function applyParameterChanges() {
   nodes.forEach((node) => {
     node.mass = simParams.nodeMass;
   });
 
+  updateBondRestLengths();
   bonds.forEach((bond) => {
     switch (bond.role) {
       case 'z+':
@@ -330,7 +394,8 @@ function energySummary() {
   const elastic = bonds.reduce((sum, bond) => {
     return sum + 0.5 * bond.stiffness * Math.pow(bond.restLength * bond.strain, 2);
   }, 0);
-  return { kinetic, elastic, total: kinetic + elastic };
+  const { jahnTeller } = jahnTellerSummary();
+  return { kinetic, elastic, jahnTeller, total: kinetic + elastic + jahnTeller };
 }
 
 function strainSummary() {
@@ -345,11 +410,22 @@ function strainSummary() {
   return { average: total / bonds.length, max };
 }
 
-function recordAnalysisFrame(frame) {
-  if (!analysisCapture.enabled) return;
-  const visibleNodes = nodes.filter((node) => node.showVisual);
-  const snapshot = {
-    frame,
+function jahnTellerSummary() {
+  const { q2, q3 } = distortionMetrics();
+  const jahnTeller = 0.5 * simParams.jahnTellerCoupling * (q2 * q2 + q3 * q3);
+  return { q2, q3, jahnTeller };
+}
+
+function distortionMetrics() {
+  if (nodes.length < 7) return { q2: 0, q3: 0, rX: 0, rY: 0, rZ: 0 };
+  const rX = (nodes[0].pos.distanceTo(nodes[1].pos) + nodes[0].pos.distanceTo(nodes[2].pos)) / 2;
+  const rY = (nodes[0].pos.distanceTo(nodes[3].pos) + nodes[0].pos.distanceTo(nodes[4].pos)) / 2;
+  const rZ = (nodes[0].pos.distanceTo(nodes[5].pos) + nodes[0].pos.distanceTo(nodes[6].pos)) / 2;
+  const q3 = (2 * rZ - rX - rY) / Math.sqrt(6);
+  const q2 = (rX - rY) / Math.sqrt(2);
+  return { q2, q3, rX, rY, rZ };
+}
+
 function recordAnalysisFrame(frame) {
   if (!analysisCapture.enabled) return;
   const visibleNodes = nodes.filter((node) => node.showVisual);
@@ -372,7 +448,7 @@ function recordAnalysisFrame(frame) {
     })
   };
 
-    analysisCapture.data.push(snapshot);
+  analysisCapture.data.push(snapshot);
   if (analysisCapture.data.length >= analysisCapture.maxFrames) {
     stopAndExportAnalysis();
   }
@@ -405,7 +481,7 @@ function animate() {
   requestAnimationFrame(animate);
   const dt = Math.min(clock.getDelta(), 0.03);
   if (!paused) {
-    const steps = 4;
+    const steps = stableSubsteps(dt);
     for (let i = 0; i < steps; i++) {
       integrate(dt / steps);
     }
@@ -413,13 +489,19 @@ function animate() {
     nodes.forEach((node) => node.updateVisuals(showVel, showStress));
     const energy = energySummary();
     const strain = strainSummary();
+    const distortion = distortionMetrics();
+    const jahn = jahnTellerSummary();
     const energyDiv = document.getElementById('energy');
     const strainDiv = document.getElementById('strain');
+    const distortionDiv = document.getElementById('distortion');
     if (energyDiv) {
-      energyDiv.innerText = `Kinetic: ${energy.kinetic.toFixed(2)} | Spring: ${energy.elastic.toFixed(2)} | Total: ${energy.total.toFixed(2)}`;
+      energyDiv.innerText = `Kinetic: ${energy.kinetic.toFixed(2)} | Spring: ${energy.elastic.toFixed(2)} | JT: ${energy.jahnTeller.toFixed(2)} | Total: ${energy.total.toFixed(2)}`;
     }
     if (strainDiv) {
       strainDiv.innerText = `Δr/r₀ 平均: ${strain.average.toFixed(4)} | 最大: ${strain.max.toFixed(4)}`;
+    }
+    if (distortionDiv) {
+      distortionDiv.innerText = `Q2: ${jahn.q2.toFixed(3)} | Q3: ${jahn.q3.toFixed(3)} | rₓ: ${distortion.rX.toFixed(2)} | rᵧ: ${distortion.rY.toFixed(2)} | r_z: ${distortion.rZ.toFixed(2)}`;
     }
     if (analysisCapture.enabled && frameCounter % analysisCapture.interval === 0) {
       recordAnalysisFrame(frameCounter);
