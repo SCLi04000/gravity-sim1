@@ -27,6 +27,7 @@ scene.add(grid);
 
 // Parameters
 const baseDistance = 35;
+const baseRestLength = baseDistance;
 const radius = 3.5;
 const repulsionStrength = 80;
 const repulsionLength = radius * 4;
@@ -38,7 +39,8 @@ const simParams = {
   bondKXY: 10,
   jahnTellerDelta: 0.25,
   damping: 0.04,
-  nodeMass: 12
+  nodeMass: 12,
+  jahnTellerCoupling: 2.2
 };
 
 class Node {
@@ -86,8 +88,8 @@ class Node {
     this.currentStrain = 0;
   }
 
-  addBond(targetIndex, restLength, stiffness) {
-    this.adjacency.push({ targetIndex, restLength, stiffness });
+  addBond(targetIndex, restLength, stiffness, role = 'xy') {
+    this.adjacency.push({ targetIndex, restLength, stiffness, role });
   }
 
   applyForce(force) {
@@ -167,12 +169,26 @@ function clearScene() {
 function addBond(aIndex, bIndex, stiffness, role = 'xy') {
   const a = nodes[aIndex];
   const b = nodes[bIndex];
-  const restLength = a.pos.distanceTo(b.pos);
+  const restLength = getRestLengthForRole(role);
   bonds.push({ aIndex, bIndex, restLength, stiffness, strain: 0, role });
-  a.addBond(bIndex, restLength, stiffness);
-  b.addBond(aIndex, restLength, stiffness);
+  a.addBond(bIndex, restLength, stiffness, role);
+  b.addBond(aIndex, restLength, stiffness, role);
   const key = `${Math.min(aIndex, bIndex)}-${Math.max(aIndex, bIndex)}`;
   bondedPairs.add(key);
+}
+
+function getRestLengthForRole(role) {
+  const delta = simParams.jahnTellerDelta;
+  const axialScale = 1 + delta * 0.35;
+  const compressiveScale = 1 - delta * 0.35;
+  switch (role) {
+    case 'z+':
+      return baseRestLength * axialScale;
+    case 'z-':
+      return baseRestLength * compressiveScale;
+    default:
+      return baseRestLength;
+  }
 }
 
 function buildBondLines() {
@@ -304,12 +320,24 @@ function integrate(dt) {
   nodes.forEach((node) => node.integrate(dt));
   updateBondLines();
 }
+function updateBondRestLengths() {
+  bonds.forEach((bond) => {
+    const newRest = getRestLengthForRole(bond.role);
+    bond.restLength = newRest;
+  });
+  nodes.forEach((node) => {
+    node.adjacency.forEach((edge) => {
+      edge.restLength = getRestLengthForRole(edge.role);
+    });
+  });
+}
+
 
 function applyParameterChanges() {
   nodes.forEach((node) => {
     node.mass = simParams.nodeMass;
   });
-
+ updateBondRestLengths();
   bonds.forEach((bond) => {
     switch (bond.role) {
       case 'z+':
@@ -330,6 +358,8 @@ function energySummary() {
   const elastic = bonds.reduce((sum, bond) => {
     return sum + 0.5 * bond.stiffness * Math.pow(bond.restLength * bond.strain, 2);
   }, 0);
+  const { jahnTeller } = jahnTellerSummary();
+  return { kinetic, elastic, jahnTeller, total: kinetic + elastic + jahnTeller };
   return { kinetic, elastic, total: kinetic + elastic };
 }
 
@@ -343,6 +373,21 @@ function strainSummary() {
     if (absStrain > max) max = absStrain;
   });
   return { average: total / bonds.length, max };
+}
+function jahnTellerSummary() {
+  const { q2, q3 } = distortionMetrics();
+  const jahnTeller = 0.5 * simParams.jahnTellerCoupling * (q2 * q2 + q3 * q3);
+  return { q2, q3, jahnTeller };
+}
+
+function distortionMetrics() {
+  if (nodes.length < 7) return { q2: 0, q3: 0, rX: 0, rY: 0, rZ: 0 };
+  const rX = (nodes[0].pos.distanceTo(nodes[1].pos) + nodes[0].pos.distanceTo(nodes[2].pos)) / 2;
+  const rY = (nodes[0].pos.distanceTo(nodes[3].pos) + nodes[0].pos.distanceTo(nodes[4].pos)) / 2;
+  const rZ = (nodes[0].pos.distanceTo(nodes[5].pos) + nodes[0].pos.distanceTo(nodes[6].pos)) / 2;
+  const q3 = (2 * rZ - rX - rY) / Math.sqrt(6);
+  const q2 = (rX - rY) / Math.sqrt(2);
+  return { q2, q3, rX, rY, rZ };
 }
 
 
@@ -409,13 +454,20 @@ function animate() {
     nodes.forEach((node) => node.updateVisuals(showVel, showStress));
     const energy = energySummary();
     const strain = strainSummary();
+    const distortion = distortionMetrics();
+    const jahn = jahnTellerSummary();
     const energyDiv = document.getElementById('energy');
     const strainDiv = document.getElementById('strain');
+    const distortion = distortionMetrics();
+    const jahn = jahnTellerSummary();
     if (energyDiv) {
-      energyDiv.innerText = `Kinetic: ${energy.kinetic.toFixed(2)} | Spring: ${energy.elastic.toFixed(2)} | Total: ${energy.total.toFixed(2)}`;
+      energyDiv.innerText = `Kinetic: ${energy.kinetic.toFixed(2)} | Spring: ${energy.elastic.toFixed(2)} | JT: ${energy.jahnTeller.toFixed(2)} | Total: ${energy.total.toFixed(2)}`;
     }
     if (strainDiv) {
       strainDiv.innerText = `Δr/r₀ 平均: ${strain.average.toFixed(4)} | 最大: ${strain.max.toFixed(4)}`;
+    }
+    if (distortionDiv) {
+      distortionDiv.innerText = `Q2: ${jahn.q2.toFixed(3)} | Q3: ${jahn.q3.toFixed(3)} | rₓ: ${distortion.rX.toFixed(2)} | rᵧ: ${distortion.rY.toFixed(2)} | r_z: ${distortion.rZ.toFixed(2)}`;
     }
     if (analysisCapture.enabled && frameCounter % analysisCapture.interval === 0) {
       recordAnalysisFrame(frameCounter);
