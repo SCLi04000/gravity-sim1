@@ -1,9 +1,3 @@
-import * as THREE from 'three';
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-
-const scene = new THREE.Scene();
-scene.fog = new THREE.Fog(0x0b0f1a, 50, 500);
-
 const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 2000);
 camera.position.set(100, 80, 150);
 
@@ -29,6 +23,8 @@ const baseDistance = 35;
 const radius = 3.5;
 const repulsionStrength = 80;
 const repulsionLength = radius * 4;
+const minRepulsionDistance = radius * 1.5;
+const boundaryRadius = baseDistance * 3;
 const lineBaseColor = new THREE.Color(0x4aa3ff);
 const lineMaxColor = new THREE.Color(0xff5555);
 
@@ -47,21 +43,20 @@ class Node {
     this.mass = simParams.nodeMass;
     this.radius = radius;
     this.baseColor = new THREE.Color(color);
-    this.adjacency = [];\
+    this.adjacency = [];
     this.fixed = fixed;
     this.showVisual = showVisual;
     const geometry = new THREE.SphereGeometry(1, 32, 32);
     const material = new THREE.MeshStandardMaterial({ color: this.baseColor, metalness: 0.1, roughness: 0.4 });
     this.mesh = new THREE.Mesh(geometry, material);
     this.mesh.scale.setScalar(this.radius);
-    his.mesh.visible = this.showVisual;
+    this.mesh.visible = this.showVisual;
     this.mesh.position.copy(this.pos);
     scene.add(this.mesh);
     const dirVec = this.vel.clone().normalize();
     const length = Math.max(this.vel.length() * 0.5, 0.1);
     this.arrow = new THREE.ArrowHelper(dirVec, this.pos.clone(), length, 0xffff00);
     this.arrow.visible = false;
-     this.arrow.visible = this.showVisual && this.arrow.visible;
     scene.add(this.arrow);
     this.trailPoints = [];
     this.trailLine = new THREE.Line(
@@ -87,21 +82,7 @@ class Node {
     this.vel.addScaledVector(this.acc, dt);
     this.vel.multiplyScalar(1 - simParams.damping * dt);
     this.pos.addScaledVector(this.vel, dt);
-    this.mesh.position.copy(this.pos);
-  }
-  updateVisuals(showVel, showStress) {
-    if (!this.showVisual) return;
-    const stressColor = lineMaxColor;
-    const factor = showStress ? THREE.MathUtils.clamp(this.currentStrain * 3, 0, 1) : 0;
-    const blended = this.baseColor.clone().lerp(stressColor, factor);
-    this.mesh.material.color.copy(blended);
-    if (showVel) {
-      const dirVec = this.vel.clone().normalize();
-      const length = Math.max(this.vel.length() * 0.5 * (1 + factor), 0.1);
-      this.arrow.visible = true;
-      this.arrow.setDirection(dirVec);
-      this.arrow.setLength(length);
-      this.arrow.position.copy(this.pos);
+@@ -105,99 +106,105 @@ class Node {
     } else {
       this.arrow.visible = false;
     }
@@ -127,9 +108,14 @@ let paused = false;
 let showVel = false;
 let showStress = true;
 let bondedPairs = new Set();
+let frameCounter = 0;
+const analysisCapture = {
+  enabled: false,
+  interval: 30,
+  maxFrames: 2000,
+  data: []
+};
 function clearScene() {
-  const boundaryRadius = baseDistance * 3;
-const minRepulsionDistance = radius * 1.5;
   nodes.forEach((node) => {
     scene.remove(node.mesh, node.arrow, node.trailLine);
   });
@@ -176,6 +162,7 @@ function updateBondLines() {
 }
 function reset() {
   clearScene();
+  frameCounter = 0;
   const center = new Node(0, { pos: new THREE.Vector3(0, 0, 0), color: 0x4aa3ff });
   const xPlus = new Node(1, { pos: new THREE.Vector3(baseDistance, 0, 0), color: 0xffa500 });
   const xMinus = new Node(2, { pos: new THREE.Vector3(-baseDistance, 0, 0), color: 0xffa500 });
@@ -201,20 +188,7 @@ function reset() {
         boundaryPositions.push(new THREE.Vector3(x, y, z));
       });
     });
-  });
-  boundaryPositions.forEach((pos) => {
-    const index = nodes.length;
-    const boundaryNode = new Node(index, {
-      pos,
-      color: 0x1f2433,
-      fixed: true,
-      showVisual: false
-    });
-    nodes.push(boundaryNode);
-  });
-  paused = false;
-}
-function applyBondForces() {
+@@ -218,217 +225,321 @@ function applyBondForces() {
   bonds.forEach((bond) => {
     const a = nodes[bond.aIndex];
     const b = nodes[bond.bIndex];
@@ -240,8 +214,9 @@ function applyRepulsion() {
       const b = nodes[j];
       const delta = b.pos.clone().sub(a.pos);
       const dist = Math.max(delta.length(), 1e-5);
+      const dir = delta.multiplyScalar(1 / dist);
       if (dist >= repulsionLength) continue;
-       if (dist < minRepulsionDistance) {
+      if (dist < minRepulsionDistance) {
         const penetration = minRepulsionDistance - dist;
         const forceMag = repulsionStrength * (penetration / minRepulsionDistance);
         const force = dir.clone().multiplyScalar(forceMag);
@@ -258,8 +233,6 @@ function applyRepulsion() {
         }
         continue;
       }
-      if (dist >= repulsionLength) continue;
-      const dir = delta.multiplyScalar(1 / dist);
       const strength = repulsionStrength * (1 - dist / repulsionLength);
       const force = dir.multiplyScalar(strength);
       a.applyForce(force.clone().multiplyScalar(-1));
@@ -307,6 +280,66 @@ function energySummary() {
   }, 0);
   return { kinetic, elastic, total: kinetic + elastic };
 }
+
+function strainSummary() {
+  if (bonds.length === 0) return { average: 0, max: 0 };
+  let total = 0;
+  let max = 0;
+  bonds.forEach((bond) => {
+    const absStrain = Math.abs(bond.strain);
+    total += absStrain;
+    if (absStrain > max) max = absStrain;
+  });
+  return { average: total / bonds.length, max };
+}
+
+function recordAnalysisFrame(frame) {
+  if (!analysisCapture.enabled) return;
+  const visibleNodes = nodes.filter((node) => node.showVisual);
+  const snapshot = {
+    frame,
+    nodes: visibleNodes.map((node) => ({
+      index: node.index,
+      pos: { x: node.pos.x, y: node.pos.y, z: node.pos.z }
+    })),
+    bonds: bonds.map((bond) => {
+      const a = nodes[bond.aIndex].pos;
+      const b = nodes[bond.bIndex].pos;
+      return {
+        aIndex: bond.aIndex,
+        bIndex: bond.bIndex,
+        length: a.distanceTo(b),
+        restLength: bond.restLength,
+        strain: bond.strain
+      };
+    })
+  };
+
+  analysisCapture.data.push(snapshot);
+  if (analysisCapture.data.length >= analysisCapture.maxFrames) {
+    stopAndExportAnalysis();
+  }
+  updateAnalysisStatus();
+}
+
+function stopAndExportAnalysis() {
+  if (analysisCapture.data.length > 0) {
+    console.log(JSON.stringify(analysisCapture.data));
+  }
+  analysisCapture.enabled = false;
+  analysisCapture.data = [];
+  updateAnalysisStatus();
+}
+
+function updateAnalysisStatus() {
+  const statusEl = document.getElementById('analysis-status');
+  if (!statusEl) return;
+  if (!analysisCapture.enabled) {
+    statusEl.textContent = '離線紀錄：未啟動';
+    return;
+  }
+  statusEl.textContent = `離線紀錄中：${analysisCapture.data.length} 筆（每 ${analysisCapture.interval} 幀）`;
+}
 reset();
 const clock = new THREE.Clock();
 function animate() {
@@ -317,11 +350,20 @@ function animate() {
     for (let i = 0; i < steps; i++) {
       integrate(dt / steps);
     }
+    frameCounter += 1;
     nodes.forEach((node) => node.updateVisuals(showVel, showStress));
     const energy = energySummary();
+    const strain = strainSummary();
     const energyDiv = document.getElementById('energy');
+    const strainDiv = document.getElementById('strain');
     if (energyDiv) {
       energyDiv.innerText = `Kinetic: ${energy.kinetic.toFixed(2)} | Spring: ${energy.elastic.toFixed(2)} | Total: ${energy.total.toFixed(2)}`;
+    }
+    if (strainDiv) {
+      strainDiv.innerText = `Δr/r₀ 平均: ${strain.average.toFixed(4)} | 最大: ${strain.max.toFixed(4)}`;
+    }
+    if (analysisCapture.enabled && frameCounter % analysisCapture.interval === 0) {
+      recordAnalysisFrame(frameCounter);
     }
   }
   controls.update();
@@ -357,6 +399,22 @@ function bindInputPair(rangeEl, numberEl, key, formatter = (v) => v.toFixed(2)) 
   numberEl.addEventListener('change', (e) => updateBoth(parseFloat(e.target.value)));
 }
 
+function bindCaptureInterval(rangeEl, numberEl) {
+  const updateBoth = (value) => {
+    if (Number.isNaN(value)) return;
+    const clamped = Math.max(1, Math.min(120, Math.round(value)));
+    analysisCapture.interval = clamped;
+    rangeEl.value = clamped;
+    numberEl.value = clamped;
+    const label = rangeEl.closest('.control-row')?.querySelector('.value');
+    if (label) label.textContent = clamped.toString();
+    updateAnalysisStatus();
+  };
+
+  rangeEl.addEventListener('input', (e) => updateBoth(parseFloat(e.target.value)));
+  numberEl.addEventListener('change', (e) => updateBoth(parseFloat(e.target.value)));
+}
+
 function setupControls() {
   const deltaRange = document.getElementById('delta');
   const deltaInput = document.getElementById('deltaInput');
@@ -366,6 +424,8 @@ function setupControls() {
   const massInput = document.getElementById('massInput');
   const dampingRange = document.getElementById('damping');
   const dampingInput = document.getElementById('dampingInput');
+  const captureRange = document.getElementById('captureInterval');
+  const captureInput = document.getElementById('captureIntervalInput');
 
   if (
     deltaRange &&
@@ -375,12 +435,15 @@ function setupControls() {
     massRange &&
     massInput &&
     dampingRange &&
-    dampingInput
+    dampingInput &&
+    captureRange &&
+    captureInput
   ) {
     bindInputPair(deltaRange, deltaInput, 'jahnTellerDelta');
     bindInputPair(kxyRange, kxyInput, 'bondKXY', (v) => v.toFixed(1));
     bindInputPair(massRange, massInput, 'nodeMass', (v) => v.toFixed(1));
     bindInputPair(dampingRange, dampingInput, 'damping', (v) => v.toFixed(3));
+    bindCaptureInterval(captureRange, captureInput);
   }
 
   const resetBtn = document.getElementById('reset-btn');
@@ -407,7 +470,22 @@ function setupControls() {
     });
   }
 
+  const startCaptureBtn = document.getElementById('start-capture');
+  if (startCaptureBtn) {
+    startCaptureBtn.addEventListener('click', () => {
+      analysisCapture.enabled = true;
+      analysisCapture.data = [];
+      updateAnalysisStatus();
+    });
+  }
+
+  const stopCaptureBtn = document.getElementById('stop-capture');
+  if (stopCaptureBtn) {
+    stopCaptureBtn.addEventListener('click', () => stopAndExportAnalysis());
+  }
+
   updateToggleLabels();
+  updateAnalysisStatus();
 }
 
 setupControls();
